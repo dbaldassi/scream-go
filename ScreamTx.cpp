@@ -332,7 +332,9 @@ void ScreamTx::newMediaFrame(uint32_t time_ntp, uint32_t ssrc, int bytesRtp) {
   std::cout << "NewMediaFrame2" << std::endl;
   int id;
   Stream *stream = getStream(ssrc, id);
+  std::cout << "NewMediaFrame2.1" << std::endl;
   stream->updateTargetBitrate(time_ntp);
+  std::cout << "NewMediaFrame2.2" << std::endl;
   if (time_ntp - lastCwndUpdateT_ntp < 32768) { // 32768 = 0.5s in NTP domain
     std::cout << "NewMediaFrame3" << std::endl;
     /*
