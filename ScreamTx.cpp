@@ -2067,8 +2067,11 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
 		* to just enable small adjustments of the bitrate when the RTP queue grows
 		*/
 		int lastBytes = rtpQueue->getSizeOfLastFrame();
+		std::cout << "updateTargetBitrate6.2.1" << std::endl;
 		int txSizeBitsLimit = (int)(targetBitrate*0.02);
+		std::cout << "updateTargetBitrate6.2.2" << std::endl;
 		int txSizeBits = std::max(0, rtpQueue->bytesInQueue() - lastBytes) * 8;
+		std::cout << "updateTargetBitrate6.2.3" << std::endl;
 		txSizeBits = std::min(txSizeBits, txSizeBitsLimit);
 
 		std::cout << "updateTargetBitrate6.3" << std::endl;
