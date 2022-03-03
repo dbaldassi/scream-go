@@ -140,7 +140,7 @@ int RtpQueue::clear() {
             freed++;
         }
 #ifndef IGNORE_PACKET
-		packet_free(buf);
+		free(buf);
 #endif
 	}
     return (freed);
