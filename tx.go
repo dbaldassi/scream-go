@@ -12,6 +12,7 @@ package scream
 import "C"
 import (
 	"unsafe"
+	"fmt"
 )
 
 // Tx implements the sender side of SCReAM
@@ -41,6 +42,7 @@ func (t *Tx) RegisterNewStream(rtpQueue RTPQueue, ssrc uint32, priority, minBitr
 // NewMediaFrame should be called for each new video frame.
 // IsOkToTransmit should be called after newMediaFrame
 func (t *Tx) NewMediaFrame(ntpTime uint64, ssrc uint32, bytesRTP int) {
+	fmt.Printf("%v", t)
 	C.ScreamTxNewMediaFrame(t.screamTx, C.uint(ntpTime), C.uint(ssrc), C.int(bytesRTP))
 }
 

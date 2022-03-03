@@ -325,47 +325,55 @@ RtpQueueIface * ScreamTx::getStreamQueue(uint32_t ssrc) {
 * New media frame
 */
 void ScreamTx::newMediaFrame(uint32_t time_ntp, uint32_t ssrc, int bytesRtp) {
-	if (!isInitialized) initialize(time_ntp);
+  std::cout << "NewMediaFrame1" << std::endl;
+  
+  if (!isInitialized) initialize(time_ntp);
 
-	int id;
-	Stream *stream = getStream(ssrc, id);
-	stream->updateTargetBitrate(time_ntp);
-	if (time_ntp - lastCwndUpdateT_ntp < 32768) { // 32768 = 0.5s in NTP domain
-		/*
-		* We expect feedback at least every 500ms
-		* to update the target rate.
-		*/
-		stream->updateTargetBitrate(time_ntp);
-	}
-	if (time_ntp - lastBaseDelayRefreshT_ntp < sRtt_ntp * 2) {
-		/*
-		* _Very_ long periods of congestion can cause the base delay to increase
-		* with the effect that the queue delay is estimated wrong, therefore we seek to
-		* refresh the whole thing by deliberately allowing the network queue to drain
-		* Clear the RTP queue for 2 RTTs, this will allow the queue to drain so that we
-		* get a good estimate for the min queue delay.
-		* This funtion is executed very seldom so it should not affect overall experience too much
-		*/
-		int cur_cleared = stream->rtpQueue->clear();
-        if (cur_cleared) {
-            cerr << log_tag << " refresh " << time_ntp / 65536.0f << " RTP queue " << cur_cleared  << " packetes discarded for SSRC " << ssrc << endl;
-            stream->cleared += cur_cleared;
-        }
-	}
-	else {
-		stream->bytesRtp += bytesRtp;
-		stream->packetsRtp++;
-		/*
-		* Need to update MSS here, otherwise it will be nearly impossible to
-		* transmit video packets, this because of the small initial MSS
-		* which is necessary to make SCReAM work with audio only
-		*/
-		int sizeOfNextRtp = stream->rtpQueue->sizeOfNextRtp();
-		mss = std::max(mss, sizeOfNextRtp);
-		if (!openWindow)
-			cwndMin = std::max(cwndMinLow, 2 * mss);
-		cwnd = max(cwnd, cwndMin);
-	}
+  std::cout << "NewMediaFrame2" << std::endl;
+  int id;
+  Stream *stream = getStream(ssrc, id);
+  stream->updateTargetBitrate(time_ntp);
+  if (time_ntp - lastCwndUpdateT_ntp < 32768) { // 32768 = 0.5s in NTP domain
+    std::cout << "NewMediaFrame3" << std::endl;
+    /*
+     * We expect feedback at least every 500ms
+     * to update the target rate.
+     */
+    stream->updateTargetBitrate(time_ntp);
+  }
+  if (time_ntp - lastBaseDelayRefreshT_ntp < sRtt_ntp * 2) {
+    std::cout << "NewMediaFrame4" << std::endl;
+    /*
+     * _Very_ long periods of congestion can cause the base delay to increase
+     * with the effect that the queue delay is estimated wrong, therefore we seek to
+     * refresh the whole thing by deliberately allowing the network queue to drain
+     * Clear the RTP queue for 2 RTTs, this will allow the queue to drain so that we
+     * get a good estimate for the min queue delay.
+     * This funtion is executed very seldom so it should not affect overall experience too much
+     */
+    int cur_cleared = stream->rtpQueue->clear();
+    std::cout << "NewMediaFrame5" << std::endl;
+    if (cur_cleared) {
+      cerr << log_tag << " refresh " << time_ntp / 65536.0f << " RTP queue " << cur_cleared  << " packetes discarded for SSRC " << ssrc << endl;
+      stream->cleared += cur_cleared;
+    }
+  }
+  else {
+    std::cout << "NewMediaFrame6" << std::endl;
+    stream->bytesRtp += bytesRtp;
+    stream->packetsRtp++;
+    /*
+     * Need to update MSS here, otherwise it will be nearly impossible to
+     * transmit video packets, this because of the small initial MSS
+     * which is necessary to make SCReAM work with audio only
+     */
+    int sizeOfNextRtp = stream->rtpQueue->sizeOfNextRtp();
+    mss = std::max(mss, sizeOfNextRtp);
+    if (!openWindow)
+      cwndMin = std::max(cwndMinLow, 2 * mss);
+    cwnd = max(cwnd, cwndMin);
+  }
+  std::cout << "NewMediaFrame7" << std::endl;
 }
 
 /*
