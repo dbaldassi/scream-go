@@ -1,26 +1,3 @@
-// Copyright (c) 2015, Ericsson AB. All rights reserved.
-//
-// Redistribution and use in source and binary forms, with or without modification,
-// are permitted provided that the following conditions are met:
-//
-// 1. Redistributions of source code must retain the above copyright notice, this
-// list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright notice, this
-// list of conditions and the following disclaimer in the documentation and/or other
-// materials provided with the distribution.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-// IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
-// INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-// NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
-// OF SUCH DAMAGE.
-
 #include "RtpQueue.h"
 #include <iostream>
 #include <string.h>
@@ -49,34 +26,43 @@ RtpQueue::RtpQueue() {
     sizeOfNextRtp_ = -1;
 }
 
-void RtpQueue::push(void *rtpPacket, int size, unsigned short seqNr, float ts) {
+bool RtpQueue::push(void *rtpPacket, int size, unsigned short seqNr,  bool isMark, float ts) {
     int ix = head+1;
     if (ix == kRtpQueueSize) ix = 0;
     if (items[ix]->used) {
       /*
       * RTP queue is full, do a drop tail i.e ignore new RTP packets
       */
-      return;
+      return (false);
     }
     head = ix;
     items[head]->seqNr = seqNr;
     items[head]->size = size;
     items[head]->ts = ts;
+    items[head]->isMark = isMark;
     items[head]->used = true;
     bytesInQueue_ += size;
     sizeOfQueue_ += 1;
-    memcpy(items[head]->packet, rtpPacket, size);
+#ifndef IGNORE_PACKET
+    items[head]->packet = rtpPacket;
+#endif
     computeSizeOfNextRtp();
+    return (true);
 }
-
-bool RtpQueue::pop(void *rtpPacket, int& size, unsigned short& seqNr) {
+bool RtpQueue::pop(void **rtpPacket, int& size, unsigned short& seqNr, bool &isMark)
+{
     if (items[tail]->used == false) {
+        *rtpPacket = NULL;
         return false;
         sizeOfNextRtp_ = -1;
     } else {
         size = items[tail]->size;
-        memcpy(rtpPacket,items[tail]->packet,size);
-        seqNr = items[tail]->seqNr;
+
+#ifndef IGNORE_PACKET
+		*rtpPacket = items[tail]->packet;
+#endif
+		seqNr = items[tail]->seqNr;
+        isMark = items[tail]->isMark;
         items[tail]->used = false;
         tail++; if (tail == kRtpQueueSize) tail = 0;
         bytesInQueue_ -= size;
@@ -106,6 +92,14 @@ int RtpQueue::seqNrOfNextRtp() {
     }
 }
 
+int RtpQueue::seqNrOfLastRtp() {
+    if (!items[head]->used) {
+        return -1;
+    } else {
+        return items[head]->seqNr;
+    }
+}
+
 int RtpQueue::bytesInQueue() {
     return bytesInQueue_;
 }
@@ -122,22 +116,32 @@ float RtpQueue::getDelay(float currTs) {
     }
 }
 
-bool RtpQueue::sendPacket(void *rtpPacket, int& size, unsigned short& seqNr) {
+bool RtpQueue::sendPacket(void **rtpPacket, int& size, unsigned short& seqNr) {
     if (sizeOfQueue() > 0) {
-        pop(rtpPacket, size, seqNr);
+        bool isMark;
+        pop(rtpPacket, size, seqNr, isMark);
         return true;
     }
     return false;
 }
 
-void RtpQueue::clear() {
-    for (int n=0; n < kRtpQueueSize; n++) {
-        items[n]->used = false;
-    }
-    head = -1;
-    tail = 0;
-    nItems = 0;
-    bytesInQueue_ = 0;
-    sizeOfQueue_ = 0;
-    sizeOfNextRtp_ = -1;
+#ifndef IGNORE_PACKET
+extern void packet_free(void *buf);
+#endif
+int RtpQueue::clear() {
+    uint16_t seqNr;
+    int freed = 0;
+    int size;
+    void *buf;
+    while (sizeOfQueue() > 0) {
+        bool isMark;
+        pop(&buf, size, seqNr, isMark);
+        if (buf != NULL) {
+            freed++;
+        }
+#ifndef IGNORE_PACKET
+		packet_free(buf);
+#endif
+	}
+    return (freed);
 }
