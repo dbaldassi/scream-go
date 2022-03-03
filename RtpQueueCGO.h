@@ -14,6 +14,7 @@ extern "C" {
     void goClear(int);
     int goSizeOfNextRtp(int);
     int goSeqNrOfNextRtp(int);
+    int goSeqNrOfLastRtp(int);
     int goBytesInQueue(int);
     int goSizeOfQueue(int);
     float goGetDelay(int, float);
@@ -28,6 +29,7 @@ public:
     virtual void clear() = 0;
     virtual int sizeOfNextRtp() = 0;
     virtual int seqNrOfNextRtp() = 0;
+    virtual int seqNrOfLastRtp() = 0;
     virtual int bytesInQueue() = 0; // Number of bytes in queue
     virtual int sizeOfQueue() = 0;  // Number of items in queue
     virtual float getDelay(float currTs) = 0;
@@ -41,6 +43,7 @@ public:
     void clear();
     int sizeOfNextRtp();
     int seqNrOfNextRtp();
+    int seqNrOfLastRtp();
     int bytesInQueue(); // Number of bytes in queue
     int sizeOfQueue();  // Number of items in queue
     float getDelay(float currTs);

@@ -12,9 +12,9 @@ type RTPQueue interface {
 	SizeOfNextRTP() int
 
 	// SeqNrOfNextRTP returns the RTP sequence number of the next item in the queue
-	SeqNrOfNextRTP() int
+	SeqNrOfNextRTP() uint16
 
-	SeqNrOfLastRTP() int
+	SeqNrOfLastRTP() uint16
 
 	// BytesInQueue returns the total number of bytes in the queue, i.e. the
 	// sum of the sizes of all items in the queue.
