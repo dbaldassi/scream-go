@@ -2055,7 +2055,7 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
 		sclI = std::max(0.25f, std::min(1.0f, sclI));
 		float increment = 0.0f;
 
-		std::cout << "updateTargetBitrate6.2" << std::endl;
+		std::cout << "updateTargetBitrate6.2 " << std::hex << rtpQueue << std::endl;
 		/*
 		* Size of RTP queue [bits]
 		* As this function is called immediately after a
