@@ -1972,6 +1972,7 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
 	isActive = true;
 	lastFrameT_ntp = time_ntp;
 	if (lossEventFlag || ecnCeEventFlag) {
+	  std::cout << "updateTargetBitrate2" << std::endl;
 		/*
 		* Loss event handling
 		* Rate is reduced slightly to avoid that more frames than necessary
@@ -1988,6 +1989,7 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
 			updateTargetBitrateI(br);
 			lastTargetBitrateIUpdateT_ntp = time_ntp;
 		}
+		std::cout << "updateTargetBitrate3" << std::endl;
 		if (lossEventFlag)
 			targetBitrate = std::max(minBitrate, targetBitrate*lossEventRateScale);
 		else if (ecnCeEventFlag) {
@@ -2002,6 +2004,7 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
 				targetBitrate = std::max(minBitrate, targetBitrate*ecnCeEventRateScale);
 			}
 		}
+		std::cout << "updateTargetBitrate4" << std::endl;
 		float rtpQueueDelay = rtpQueue->getDelay(time_ntp * ntp2SecScaleFactor);
 		if (rtpQueueDelay > maxRtpQueueDelay &&
 			(time_ntp - lastRtpQueueDiscardT_ntp > kMinRtpQueueDiscardInterval_ntp)) {
@@ -2030,8 +2033,10 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
 		lossEventFlag = false;
 		ecnCeEventFlag = false;
 		lastBitrateAdjustT_ntp = time_ntp;
+		std::cout << "updateTargetBitrate5" << std::endl;
 	}
 	else {
+	  std::cout << "updateTargetBitrate6" << std::endl;
 		if (time_ntp - lastBitrateAdjustT_ntp < kRateAdjustInterval_ntp)
 			return;
 		/*
@@ -2067,6 +2072,7 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
 		const float alpha = 0.5f;
 
 		txSizeBitsAvg = txSizeBitsAvg * alpha + txSizeBits * (1.0f - alpha);
+		std::cout << "updateTargetBitrate7" << std::endl;
 		/*
 		* tmp is a local scaling factor that makes rate adaptation sligthly more
 		* aggressive when competing flows (e.g file transfers) are detected
@@ -2077,6 +2083,7 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
 		}
 
 		float rtpQueueDelay = rtpQueue->getDelay(time_ntp * ntp2SecScaleFactor);
+		std::cout << "updateTargetBitrate8" << std::endl;
 		if (rtpQueueDelay > maxRtpQueueDelay &&
 			(time_ntp - lastRtpQueueDiscardT_ntp > kMinRtpQueueDiscardInterval_ntp)) {
 			/*
@@ -2088,7 +2095,9 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
             int seqNrOfLastRtp =  rtpQueue->seqNrOfLastRtp();
             int pak_diff = (seqNrOfLastRtp == -1) ? -1 : ((seqNrOfLastRtp >= hiSeqTx ) ? (seqNrOfLastRtp - hiSeqTx ) : seqNrOfLastRtp + 0xffff - hiSeqTx);
 
+	    std::cout << "updateTargetBitrate9" << std::endl;
             int cur_cleared = rtpQueue->clear();
+	    std::cout << "updateTargetBitrate10" << std::endl;
             cerr << log_tag << " rtpQueueDelay " << rtpQueueDelay << " too large 2 " << time_ntp / 65536.0f << " RTP queue " << cur_cleared  <<
                 " packetes discarded for SSRC " << ssrc << " hiSeqTx " << hiSeqTx << " hiSeqAckendl " << hiSeqAck <<
                 " seqNrOfNextRtp " << seqNrOfNextRtp <<  " seqNrOfLastRtp " << seqNrOfLastRtp << " diff " << pak_diff << endl;
@@ -2228,6 +2237,7 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
 		lastBitrateAdjustT_ntp = time_ntp;
 	}
 
+	std::cout << "updateTargetBitrate--------------" << std::endl;
 	targetBitrate = std::min(maxBitrate, std::max(minBitrate, targetBitrate));
 }
 
