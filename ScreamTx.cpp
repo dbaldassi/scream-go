@@ -1035,7 +1035,7 @@ void ScreamTx::getLog(float time, char *s) {
 	for (int n = 0; n < nStreams; n++) {
 		Stream *tmp = streams[n];
 		char s2[200];
-		sprintf(s2, "%4.3f, %d,%d,%6.0f, %6.0f, %lu, %6.0f, %6.0f, %5.0f, %5.0f, %lu, %5d, %lu,%lu",
+		sprintf(s2, "%4.3f, %d, %d, %6.0f, %6.0f, %lu, %6.0f, %6.0f, %5.0f, %5.0f, %lu, %5d, %lu, %lu",
 			std::max(0.0f, tmp->rtpQueue->getDelay(time)),
             tmp->rtpQueue->bytesInQueue(),
             tmp->rtpQueue->sizeOfQueue(),
