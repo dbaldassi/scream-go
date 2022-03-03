@@ -1,3 +1,3 @@
-module github.com/mengelbart/scream-go
+module github.com/dbaldassi/scream-go
 
 go 1.15
