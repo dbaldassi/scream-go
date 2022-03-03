@@ -332,7 +332,7 @@ void ScreamTx::newMediaFrame(uint32_t time_ntp, uint32_t ssrc, int bytesRtp) {
   std::cout << "NewMediaFrame2" << std::endl;
   int id;
   Stream *stream = getStream(ssrc, id);
-  std::cout << "NewMediaFrame2.1" << std::endl;
+  std::cout << "NewMediaFrame2.1" <<  std::hex << stream << std::endl;
   stream->updateTargetBitrate(time_ntp);
   std::cout << "NewMediaFrame2.2" << std::hex << stream << std::endl;
   if (time_ntp - lastCwndUpdateT_ntp < 32768) { // 32768 = 0.5s in NTP domain
@@ -2039,6 +2039,7 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
 	  std::cout << "updateTargetBitrate6" << std::endl;
 		if (time_ntp - lastBitrateAdjustT_ntp < kRateAdjustInterval_ntp)
 			return;
+		std::cout << "updateTargetBitrate6.1" << std::endl;
 		/*
 		* A scale factor that is dependent on the inflection point
 		* i.e the last known highest video bitrate
@@ -2054,6 +2055,7 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
 		sclI = std::max(0.25f, std::min(1.0f, sclI));
 		float increment = 0.0f;
 
+		std::cout << "updateTargetBitrate6.2" << std::endl;
 		/*
 		* Size of RTP queue [bits]
 		* As this function is called immediately after a
@@ -2069,6 +2071,7 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
 		int txSizeBits = std::max(0, rtpQueue->bytesInQueue() - lastBytes) * 8;
 		txSizeBits = std::min(txSizeBits, txSizeBitsLimit);
 
+		std::cout << "updateTargetBitrate6.3" << std::endl;
 		const float alpha = 0.5f;
 
 		txSizeBitsAvg = txSizeBitsAvg * alpha + txSizeBits * (1.0f - alpha);
