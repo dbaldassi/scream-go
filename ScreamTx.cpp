@@ -334,7 +334,7 @@ void ScreamTx::newMediaFrame(uint32_t time_ntp, uint32_t ssrc, int bytesRtp) {
   Stream *stream = getStream(ssrc, id);
   std::cout << "NewMediaFrame2.1" << std::endl;
   stream->updateTargetBitrate(time_ntp);
-  std::cout << "NewMediaFrame2.2" << std::endl;
+  std::cout << "NewMediaFrame2.2" << std::hex << stream << std::endl;
   if (time_ntp - lastCwndUpdateT_ntp < 32768) { // 32768 = 0.5s in NTP domain
     std::cout << "NewMediaFrame3" << std::endl;
     /*
@@ -1957,6 +1957,7 @@ void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
 	* Compute a maximum bitrate, this bitrates includes the RTP overhead
 	*/
 
+  std::cout << "updateTargetBitrate1" << std::endl;
 	float br = getMaxRate();
 	float rateRtpLimit = std::max(rateRtp, br);
 	if (initTime_ntp == 0) {
