@@ -1943,281 +1943,288 @@ void ScreamTx::Stream::updateTargetBitrateI(float br) {
 *  rate adaptive streaming with SCReAM work despite these anomalies.
 */
 void ScreamTx::Stream::updateTargetBitrate(uint32_t time_ntp) {
+  /*
+   * Compute a maximum bitrate, this bitrates includes the RTP overhead
+   */
+
+  float br = getMaxRate();
+  float rateRtpLimit = std::max(rateRtp, br);
+
+  std::cout << "br: " << br << "\n"
+	    << "rateRtpLimit: " << rateRtpLimit << std::endl;
+  
+  if (initTime_ntp == 0) {
+    /*
+     * Initialize if the first time
+     */
+    initTime_ntp = time_ntp;
+    lastRtpQueueDiscardT_ntp = time_ntp;
+  }
+
+  if (lastBitrateAdjustT_ntp == 0) lastBitrateAdjustT_ntp = time_ntp;
+  isActive = true;
+  lastFrameT_ntp = time_ntp;
+  if (lossEventFlag || ecnCeEventFlag) {
+    std::cout << "lossEventFlag || ecnCeEventFlag" << std::endl;
+    /*
+     * Loss event handling
+     * Rate is reduced slightly to avoid that more frames than necessary
+     * queue up in the sender queue
+     */
+    if (time_ntp - lastTargetBitrateIUpdateT_ntp > 2000000) {
+      /*
+       * The timing constraint avoids that targetBitrateI
+       *  is set too low in cases where a congestion event is prolonged.
+       * An accurate targetBitrateI is not of extreme importance
+       *  but helps to avoid jitter spikes when SCReAM operates
+       *  over fixed bandwidth or slowly varying links.
+       */
+      updateTargetBitrateI(br);
+      lastTargetBitrateIUpdateT_ntp = time_ntp;
+    }
+    if (lossEventFlag)
+      targetBitrate = std::max(minBitrate, targetBitrate*lossEventRateScale);
+    else if (ecnCeEventFlag) {
+      if (parent->isL4s) {
 	/*
-	* Compute a maximum bitrate, this bitrates includes the RTP overhead
-	*/
+	 * scale backoff factor with RTT
+	 */
+	float backOff = parent->l4sAlpha / 2.0f;
+	targetBitrate = std::max(minBitrate, targetBitrate*(1.0f - backOff));
+      }
+      else {
+	targetBitrate = std::max(minBitrate, targetBitrate*ecnCeEventRateScale);
+      }
+    }
+    float rtpQueueDelay = rtpQueue->getDelay(time_ntp * ntp2SecScaleFactor);
+    if (rtpQueueDelay > maxRtpQueueDelay &&
+	(time_ntp - lastRtpQueueDiscardT_ntp > kMinRtpQueueDiscardInterval_ntp)) {
+      /*
+       * RTP queue is cleared as it is becoming too large,
+       * Function is however disabled initially as there is no reliable estimate of the
+       * throughput in the initial phase.
+       */
+      int seqNrOfNextRtp = rtpQueue->seqNrOfNextRtp();
+      int seqNrOfLastRtp =  rtpQueue->seqNrOfLastRtp();
+      int pak_diff = (seqNrOfLastRtp == -1) ? -1 : ((seqNrOfLastRtp >= hiSeqTx ) ? (seqNrOfLastRtp - hiSeqTx ) : seqNrOfLastRtp + 0xffff - hiSeqTx);
 
-	float br = getMaxRate();
-	float rateRtpLimit = std::max(rateRtp, br);
-	if (initTime_ntp == 0) {
-		/*
-		* Initialize if the first time
-		*/
-		initTime_ntp = time_ntp;
-		lastRtpQueueDiscardT_ntp = time_ntp;
+      int cur_cleared = rtpQueue->clear();
+      cout << log_tag << " rtpQueueDelay " << rtpQueueDelay << " too large 1 " << time_ntp / 65536.0f << " RTP queue " << cur_cleared  <<
+	" packetes discarded for SSRC " << ssrc << " hiSeqTx " << hiSeqTx << " hiSeqAckendl " << hiSeqAck <<
+	" seqNrOfNextRtp " << seqNrOfNextRtp <<  " seqNrOfLastRtp " << seqNrOfLastRtp << " diff " << pak_diff << endl;
+      cleared += cur_cleared;
+      rtpQueueDiscard = true;
+      lossEpoch = true;
+
+      lastRtpQueueDiscardT_ntp = time_ntp;
+      targetRateScale = 1.0;
+      txSizeBitsAvg = 0.0f;
+    }
+
+    lossEventFlag = false;
+    ecnCeEventFlag = false;
+    lastBitrateAdjustT_ntp = time_ntp;
+  }
+  else {
+    if (time_ntp - lastBitrateAdjustT_ntp < kRateAdjustInterval_ntp)
+      return;
+    /*
+     * A scale factor that is dependent on the inflection point
+     * i.e the last known highest video bitrate
+     * This reduces rate and delay overshoot
+     * L4S allows for a faster path through the inflection point
+     */
+    float sclI = (targetBitrate - targetBitrateI) / targetBitrateI;
+    if (parent->isL4s)
+      sclI *= 32;
+    else
+      sclI *= 4;
+    sclI = sclI * sclI;
+    sclI = std::max(0.25f, std::min(1.0f, sclI));
+    float increment = 0.0f;
+
+    /*
+     * Size of RTP queue [bits]
+     * As this function is called immediately after a
+     * video frame is produced, we need to accept the new
+     * RTP packets in the queue, we subtract a number of bytes correspoding to the size
+     * of the last frame (including RTP overhead), this is simply the aggregated size
+     * of the RTP packets with the highest RTP timestamp
+     * txSizeBits is the number of bits in the RTP queue, this is limited
+     * to just enable small adjustments of the bitrate when the RTP queue grows
+     */
+    int lastBytes = rtpQueue->getSizeOfLastFrame();
+    int txSizeBitsLimit = (int)(targetBitrate*0.02);
+    int txSizeBits = std::max(0, rtpQueue->bytesInQueue() - lastBytes) * 8;
+    txSizeBits = std::min(txSizeBits, txSizeBitsLimit);
+
+    const float alpha = 0.5f;
+
+    txSizeBitsAvg = txSizeBitsAvg * alpha + txSizeBits * (1.0f - alpha);
+    /*
+     * tmp is a local scaling factor that makes rate adaptation sligthly more
+     * aggressive when competing flows (e.g file transfers) are detected
+     */
+    float rampUpSpeedTmp = std::min(rampUpSpeed, targetBitrate*rampUpScale);
+    if (parent->isCompetingFlows()) {
+      rampUpSpeedTmp *= 2.0f;
+    }
+
+    float rtpQueueDelay = rtpQueue->getDelay(time_ntp * ntp2SecScaleFactor);
+    if (rtpQueueDelay > maxRtpQueueDelay &&
+	(time_ntp - lastRtpQueueDiscardT_ntp > kMinRtpQueueDiscardInterval_ntp)) {
+      /*
+       * RTP queue is cleared as it is becoming too large,
+       * Function is however disabled initially as there is no reliable estimate of the
+       * throughput in the initial phase.
+       */
+      int seqNrOfNextRtp = rtpQueue->seqNrOfNextRtp();
+      int seqNrOfLastRtp =  rtpQueue->seqNrOfLastRtp();
+      int pak_diff = (seqNrOfLastRtp == -1) ? -1 : ((seqNrOfLastRtp >= hiSeqTx ) ? (seqNrOfLastRtp - hiSeqTx ) : seqNrOfLastRtp + 0xffff - hiSeqTx);
+
+      int cur_cleared = rtpQueue->clear();
+      cerr << log_tag << " rtpQueueDelay " << rtpQueueDelay << " too large 2 " << time_ntp / 65536.0f << " RTP queue " << cur_cleared  <<
+	" packetes discarded for SSRC " << ssrc << " hiSeqTx " << hiSeqTx << " hiSeqAckendl " << hiSeqAck <<
+	" seqNrOfNextRtp " << seqNrOfNextRtp <<  " seqNrOfLastRtp " << seqNrOfLastRtp << " diff " << pak_diff << endl;
+      cleared += cur_cleared;
+      rtpQueueDiscard = true;
+      lossEpoch = true;
+      lastRtpQueueDiscardT_ntp = time_ntp;
+      targetRateScale = 1.0;
+      txSizeBitsAvg = 0.0f;
+    }
+    else if (parent->inFastStart && rtpQueueDelay < 0.1f) {
+      /*
+       * Increment bitrate, limited by the rampUpSpeed
+       */
+      increment = rampUpSpeedTmp * (kRateAdjustInterval_ntp * ntp2SecScaleFactor);
+      /*
+       * Limit increase rate near the last known highest bitrate or if priority is low
+       */
+      increment *= sclI * sqrt(targetPriority);
+      /*
+       * Limited increase if the actual coder rate is lower than the target
+       */
+      if (targetBitrate > rateRtpLimit) {
+	/*
+	 * Limit increase if the target bitrate is considerably higher than the actual
+	 *  bitrate, this is an indication of an idle source.
+	 * It can also be the case that the encoder consistently delivers a lower rate than
+	 *  the target rate. We don't want to deadlock the bitrate rampup because of this so
+	 *  we gradually reduce the increment the larger the difference is
+	 */
+	float scale = std::max(-1.0f, 2.0f*(rateRtpLimit / targetBitrate - 1.0f));
+	increment *= (1.0 + scale);
+      }
+      /*
+       * Add increment
+       */
+      targetBitrate += increment;
+      wasFastStart = true;
+    }
+    else {
+      if (wasFastStart) {
+	wasFastStart = false;
+	if (time_ntp - lastTargetBitrateIUpdateT_ntp > 65536) { // 1s in NTP domain
+	  /*
+	   * The timing constraint avoids that targetBitrateI
+	   * is set too low in cases where a
+	   * congestion event is prolonged
+	   */
+	  updateTargetBitrateI(br);
+	  lastTargetBitrateIUpdateT_ntp = time_ntp;
 	}
+      }
 
-	if (lastBitrateAdjustT_ntp == 0) lastBitrateAdjustT_ntp = time_ntp;
-	isActive = true;
-	lastFrameT_ntp = time_ntp;
-	if (lossEventFlag || ecnCeEventFlag) {
-		/*
-		* Loss event handling
-		* Rate is reduced slightly to avoid that more frames than necessary
-		* queue up in the sender queue
-		*/
-		if (time_ntp - lastTargetBitrateIUpdateT_ntp > 2000000) {
-			/*
-			* The timing constraint avoids that targetBitrateI
-			*  is set too low in cases where a congestion event is prolonged.
-			* An accurate targetBitrateI is not of extreme importance
-			*  but helps to avoid jitter spikes when SCReAM operates
-			*  over fixed bandwidth or slowly varying links.
-			*/
-			updateTargetBitrateI(br);
-			lastTargetBitrateIUpdateT_ntp = time_ntp;
-		}
-		if (lossEventFlag)
-			targetBitrate = std::max(minBitrate, targetBitrate*lossEventRateScale);
-		else if (ecnCeEventFlag) {
-			if (parent->isL4s) {
-				/*
-				 * scale backoff factor with RTT
-				 */
-				float backOff = parent->l4sAlpha / 2.0f;
-				targetBitrate = std::max(minBitrate, targetBitrate*(1.0f - backOff));
-			}
-			else {
-				targetBitrate = std::max(minBitrate, targetBitrate*ecnCeEventRateScale);
-			}
-		}
-		float rtpQueueDelay = rtpQueue->getDelay(time_ntp * ntp2SecScaleFactor);
-		if (rtpQueueDelay > maxRtpQueueDelay &&
-			(time_ntp - lastRtpQueueDiscardT_ntp > kMinRtpQueueDiscardInterval_ntp)) {
-			/*
-			* RTP queue is cleared as it is becoming too large,
-			* Function is however disabled initially as there is no reliable estimate of the
-			* throughput in the initial phase.
-			*/
-            int seqNrOfNextRtp = rtpQueue->seqNrOfNextRtp();
-            int seqNrOfLastRtp =  rtpQueue->seqNrOfLastRtp();
-            int pak_diff = (seqNrOfLastRtp == -1) ? -1 : ((seqNrOfLastRtp >= hiSeqTx ) ? (seqNrOfLastRtp - hiSeqTx ) : seqNrOfLastRtp + 0xffff - hiSeqTx);
+      /*
+       * Update target rate
+       */
 
-            int cur_cleared = rtpQueue->clear();
-            cerr << log_tag << " rtpQueueDelay " << rtpQueueDelay << " too large 1 " << time_ntp / 65536.0f << " RTP queue " << cur_cleared  <<
-                " packetes discarded for SSRC " << ssrc << " hiSeqTx " << hiSeqTx << " hiSeqAckendl " << hiSeqAck <<
-                " seqNrOfNextRtp " << seqNrOfNextRtp <<  " seqNrOfLastRtp " << seqNrOfLastRtp << " diff " << pak_diff << endl;
-            cleared += cur_cleared;
-			rtpQueueDiscard = true;
-			lossEpoch = true;
+      float increment = br;
+      if (!parent->isL4s || parent->l4sAlpha < 0.01) {
+	/*
+	 * Apply the extra precaution with respect to queue delay and
+	 * RTP queue only if L4S is not running or when ECN marking does not occur for a longer period
+	 * scl is based on the queue delay trend
+	 */
+	float scl = queueDelayGuard * parent->getQueueDelayTrend();
+	if (parent->isCompetingFlows())
+	  scl *= 0.05f;
+	increment = increment * (1.0f - scl) - txQueueSizeFactor * txSizeBitsAvg;
+      }
+      increment -= targetBitrate;
+      if (txSizeBits > 12000 && increment > 0)
+	increment = 0;
 
-			lastRtpQueueDiscardT_ntp = time_ntp;
-			targetRateScale = 1.0;
-			txSizeBitsAvg = 0.0f;
-		}
-
-		lossEventFlag = false;
-		ecnCeEventFlag = false;
-		lastBitrateAdjustT_ntp = time_ntp;
+      if (increment > 0) {
+	wasFastStart = true;
+	float incrementScale = 1.0f;
+	if (parent->isL4s && parent->l4sAlpha > 0.01f) {
+	  /*
+	   * In L4S mode we can boost the rate increase some extra
+	   */
+	  incrementScale = 2.0f;
 	}
 	else {
-		if (time_ntp - lastBitrateAdjustT_ntp < kRateAdjustInterval_ntp)
-			return;
-		/*
-		* A scale factor that is dependent on the inflection point
-		* i.e the last known highest video bitrate
-		* This reduces rate and delay overshoot
-		* L4S allows for a faster path through the inflection point
-		*/
-		float sclI = (targetBitrate - targetBitrateI) / targetBitrateI;
-		if (parent->isL4s)
-			sclI *= 32;
-		else
-			sclI *= 4;
-		sclI = sclI * sclI;
-		sclI = std::max(0.25f, std::min(1.0f, sclI));
-		float increment = 0.0f;
-
-		/*
-		* Size of RTP queue [bits]
-		* As this function is called immediately after a
-		* video frame is produced, we need to accept the new
-		* RTP packets in the queue, we subtract a number of bytes correspoding to the size
-		* of the last frame (including RTP overhead), this is simply the aggregated size
-		* of the RTP packets with the highest RTP timestamp
-		* txSizeBits is the number of bits in the RTP queue, this is limited
-		* to just enable small adjustments of the bitrate when the RTP queue grows
-		*/
-		int lastBytes = rtpQueue->getSizeOfLastFrame();
-		int txSizeBitsLimit = (int)(targetBitrate*0.02);
-		int txSizeBits = std::max(0, rtpQueue->bytesInQueue() - lastBytes) * 8;
-		txSizeBits = std::min(txSizeBits, txSizeBitsLimit);
-
-		const float alpha = 0.5f;
-
-		txSizeBitsAvg = txSizeBitsAvg * alpha + txSizeBits * (1.0f - alpha);
-		/*
-		* tmp is a local scaling factor that makes rate adaptation sligthly more
-		* aggressive when competing flows (e.g file transfers) are detected
-		*/
-		float rampUpSpeedTmp = std::min(rampUpSpeed, targetBitrate*rampUpScale);
-		if (parent->isCompetingFlows()) {
-			rampUpSpeedTmp *= 2.0f;
-		}
-
-		float rtpQueueDelay = rtpQueue->getDelay(time_ntp * ntp2SecScaleFactor);
-		if (rtpQueueDelay > maxRtpQueueDelay &&
-			(time_ntp - lastRtpQueueDiscardT_ntp > kMinRtpQueueDiscardInterval_ntp)) {
-			/*
-			* RTP queue is cleared as it is becoming too large,
-			* Function is however disabled initially as there is no reliable estimate of the
-			* throughput in the initial phase.
-			*/
-            int seqNrOfNextRtp = rtpQueue->seqNrOfNextRtp();
-            int seqNrOfLastRtp =  rtpQueue->seqNrOfLastRtp();
-            int pak_diff = (seqNrOfLastRtp == -1) ? -1 : ((seqNrOfLastRtp >= hiSeqTx ) ? (seqNrOfLastRtp - hiSeqTx ) : seqNrOfLastRtp + 0xffff - hiSeqTx);
-
-            int cur_cleared = rtpQueue->clear();
-            cerr << log_tag << " rtpQueueDelay " << rtpQueueDelay << " too large 2 " << time_ntp / 65536.0f << " RTP queue " << cur_cleared  <<
-                " packetes discarded for SSRC " << ssrc << " hiSeqTx " << hiSeqTx << " hiSeqAckendl " << hiSeqAck <<
-                " seqNrOfNextRtp " << seqNrOfNextRtp <<  " seqNrOfLastRtp " << seqNrOfLastRtp << " diff " << pak_diff << endl;
-            cleared += cur_cleared;
-			rtpQueueDiscard = true;
-			lossEpoch = true;
-			lastRtpQueueDiscardT_ntp = time_ntp;
-			targetRateScale = 1.0;
-			txSizeBitsAvg = 0.0f;
-		}
-		else if (parent->inFastStart && rtpQueueDelay < 0.1f) {
-			/*
-			* Increment bitrate, limited by the rampUpSpeed
-			*/
-			increment = rampUpSpeedTmp * (kRateAdjustInterval_ntp * ntp2SecScaleFactor);
-			/*
-			* Limit increase rate near the last known highest bitrate or if priority is low
-			*/
-			increment *= sclI * sqrt(targetPriority);
-			/*
-			* Limited increase if the actual coder rate is lower than the target
-			*/
-			if (targetBitrate > rateRtpLimit) {
-				/*
-				 * Limit increase if the target bitrate is considerably higher than the actual
-				 *  bitrate, this is an indication of an idle source.
-				 * It can also be the case that the encoder consistently delivers a lower rate than
-				 *  the target rate. We don't want to deadlock the bitrate rampup because of this so
-				 *  we gradually reduce the increment the larger the difference is
-				 */
-				float scale = std::max(-1.0f, 2.0f*(rateRtpLimit / targetBitrate - 1.0f));
-				increment *= (1.0 + scale);
-			}
-			/*
-			* Add increment
-			*/
-			targetBitrate += increment;
-			wasFastStart = true;
-		}
-		else {
-			if (wasFastStart) {
-				wasFastStart = false;
-				if (time_ntp - lastTargetBitrateIUpdateT_ntp > 65536) { // 1s in NTP domain
-					/*
-					* The timing constraint avoids that targetBitrateI
-					* is set too low in cases where a
-					* congestion event is prolonged
-					*/
-					updateTargetBitrateI(br);
-					lastTargetBitrateIUpdateT_ntp = time_ntp;
-				}
-			}
-
-			/*
-			* Update target rate
-			*/
-
-			float increment = br;
-			if (!parent->isL4s || parent->l4sAlpha < 0.01) {
-				/*
-				* Apply the extra precaution with respect to queue delay and
-				* RTP queue only if L4S is not running or when ECN marking does not occur for a longer period
-				* scl is based on the queue delay trend
-				*/
-				float scl = queueDelayGuard * parent->getQueueDelayTrend();
-				if (parent->isCompetingFlows())
-					scl *= 0.05f;
-				increment = increment * (1.0f - scl) - txQueueSizeFactor * txSizeBitsAvg;
-			}
-			increment -= targetBitrate;
-			if (txSizeBits > 12000 && increment > 0)
-				increment = 0;
-
-			if (increment > 0) {
-				wasFastStart = true;
-				float incrementScale = 1.0f;
-				if (parent->isL4s && parent->l4sAlpha > 0.01f) {
-					/*
-					 * In L4S mode we can boost the rate increase some extra
-					 */
-					incrementScale = 2.0f;
-				}
-				else {
-					/*
-					 * At very low bitrates it is necessary to actively try to push the
-					 *  the bitrate up some extra
-					 */
-					incrementScale = 1.0f + 0.05f*std::min(1.0f, 50000.0f / targetBitrate);
-				}
-				increment *= incrementScale;
-				if (!parent->isCompetingFlows()) {
-					/*
-					* Limit the bitrate increase so that it does not go faster than rampUpSpeedTmp
-					* This limitation is not in effect if competing flows are detected
-					*/
-					increment *= sclI;
-					increment = std::min(increment, (float)(rampUpSpeedTmp*(kRateAdjustInterval_ntp * ntp2SecScaleFactor)));
-				}
-				/*
-				* Limited increase if the actual coder rate is lower than the target
-				*/
-				if (targetBitrate > rateRtpLimit) {
-					/*
-					 * Limit increase if the target bitrate is considerably higher than the actual
-					 *  bitrate, this is an indication of an idle source.
-					 * It can also be the case that the encoder consistently delivers a lower rate than
-					 *  the target rate. We don't want to deadlock the bitrate rampup because of this so
-					 *  we gradually reduce the increment the larger the difference is
-					 */
-					float scale = std::max(-1.0f, 2.0f*(rateRtpLimit / targetBitrate - 1.0f));
-					increment *= (1.0 + scale);
-				}
-			}
-			else {
-				if (rateRtpLimit < targetBitrate) {
-					/*
-					 * Limit decrease if target bitrate is higher than actuall bitrate,
-					 *  this a possible indication of an idle source, but it may also be the case
-					 *  that the video coder consistently delivers a lower bitrate than the target
-					 */
-					float scale = std::max(-1.0f, 2.0f*(rateRtpLimit / targetBitrate - 1.0f));
-					increment *= (1.0 + scale);
-				}
-				/*
-				* Also avoid that the target bitrate is reduced if
-				* the coder bitrate is higher
-				* than the target.
-				* The possible reason is that a large I frame is transmitted, another reason is
-				* complex dynamic content.
-				*/
-				if (rateRtpLimit > targetBitrate*2.0f)
-					increment = 0.0f;
-			}
-			targetBitrate += increment;
-
-		}
-		lastBitrateAdjustT_ntp = time_ntp;
+	  /*
+	   * At very low bitrates it is necessary to actively try to push the
+	   *  the bitrate up some extra
+	   */
+	  incrementScale = 1.0f + 0.05f*std::min(1.0f, 50000.0f / targetBitrate);
 	}
+	increment *= incrementScale;
+	if (!parent->isCompetingFlows()) {
+	  /*
+	   * Limit the bitrate increase so that it does not go faster than rampUpSpeedTmp
+	   * This limitation is not in effect if competing flows are detected
+	   */
+	  increment *= sclI;
+	  increment = std::min(increment, (float)(rampUpSpeedTmp*(kRateAdjustInterval_ntp * ntp2SecScaleFactor)));
+	}
+	/*
+	 * Limited increase if the actual coder rate is lower than the target
+	 */
+	if (targetBitrate > rateRtpLimit) {
+	  /*
+	   * Limit increase if the target bitrate is considerably higher than the actual
+	   *  bitrate, this is an indication of an idle source.
+	   * It can also be the case that the encoder consistently delivers a lower rate than
+	   *  the target rate. We don't want to deadlock the bitrate rampup because of this so
+	   *  we gradually reduce the increment the larger the difference is
+	   */
+	  float scale = std::max(-1.0f, 2.0f*(rateRtpLimit / targetBitrate - 1.0f));
+	  increment *= (1.0 + scale);
+	}
+      }
+      else {
+	if (rateRtpLimit < targetBitrate) {
+	  /*
+	   * Limit decrease if target bitrate is higher than actuall bitrate,
+	   *  this a possible indication of an idle source, but it may also be the case
+	   *  that the video coder consistently delivers a lower bitrate than the target
+	   */
+	  float scale = std::max(-1.0f, 2.0f*(rateRtpLimit / targetBitrate - 1.0f));
+	  increment *= (1.0 + scale);
+	}
+	/*
+	 * Also avoid that the target bitrate is reduced if
+	 * the coder bitrate is higher
+	 * than the target.
+	 * The possible reason is that a large I frame is transmitted, another reason is
+	 * complex dynamic content.
+	 */
+	if (rateRtpLimit > targetBitrate*2.0f)
+	  increment = 0.0f;
+      }
+      targetBitrate += increment;
 
-	targetBitrate = std::min(maxBitrate, std::max(minBitrate, targetBitrate));
+    }
+    lastBitrateAdjustT_ntp = time_ntp;
+  }
+
+  std::cout << "std::min(" << maxBitrate << ", std::max(" << minBitrate << "," << targetBitrate << ")):"
+	    << std::endl;
+  targetBitrate = std::min(maxBitrate, std::max(minBitrate, targetBitrate));
 }
 
 bool ScreamTx::Stream::isRtpQueueDiscard() {
