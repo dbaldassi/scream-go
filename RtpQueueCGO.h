@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-    void goClear(int);
+    int goClear(int);
     int goSizeOfNextRtp(int);
     int goSeqNrOfNextRtp(int);
     int goSeqNrOfLastRtp(int);
@@ -26,7 +26,7 @@ extern "C" {
 
 class RtpQueueIface {
 public:
-    virtual void clear() = 0;
+    virtual int clear() = 0;
     virtual int sizeOfNextRtp() = 0;
     virtual int seqNrOfNextRtp() = 0;
     virtual int seqNrOfLastRtp() = 0;
@@ -40,7 +40,7 @@ class RtpQueueCGO : public RtpQueueIface {
 public:
     RtpQueueCGO(int);
 
-    void clear();
+    int clear();
     int sizeOfNextRtp();
     int seqNrOfNextRtp();
     int seqNrOfLastRtp();
