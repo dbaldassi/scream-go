@@ -31,7 +31,12 @@ func NewTx() *Tx {
 // Priority is in the range ]0.0..1.0] where 1.0 denotes the highest priority.
 // It is recommended that at least one stream has priority 1.0.
 // Bitrates are specified in bps
-func (t *Tx) RegisterNewStream(rtpQueue RTPQueue, ssrc uint32, priority, minBitrate, startBitrate, maxBitrate float64) {
+func (t *Tx) RegisterNewStream(rtpQueue RTPQueue,
+	ssrc uint32,
+	priority,
+	minBitrate,
+	startBitrate,
+	maxBitrate float64) {
 	srcPipelinesLock.Lock()
 	rtpQueues[ssrc] = rtpQueue
 	srcPipelinesLock.Unlock()
